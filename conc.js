@@ -1,4 +1,4 @@
-const MEM_SIZE = 50, REG_SIZE = 5, SLICE = 30;
+const MEM_SIZE = 50, REG_SIZE = 5, SLICE = 20;
 
 class Frame {
 	pc = 0;
@@ -18,6 +18,14 @@ class Scheduler {
 	}
 	
 	#execute(cmd) {
+		const goto = (addr) => {
+			if (addr[0] === ':') {
+				const target = parseInt(addr.slice(1));
+				this.frame.pc += target;
+			} else {
+				this.frame.pc = parseInt(addr);
+			}
+		}
 		/* Available instructions:
 		 * imm reg, imm
 		 * lod reg, mem
@@ -30,7 +38,7 @@ class Scheduler {
 		 */
 		const [op, sa, sb] = cmd.split(/\s*,?\s+/, 3);
 		const [a, b] = [sa, sb].map(s => parseInt(s));
-		// console.log(`${op}\t${a}, ${b}`);
+		console.log(`${op}\t${sa}, ${sb}`);
 		switch (op) {
 		case 'prt':
 			console.log(this.frame.regs[a]);
@@ -65,14 +73,14 @@ class Scheduler {
 			this.frame.pc++;
 			break;
 		case 'br':
-			this.frame.pc = a
+			goto(sa);
 			break;
 		case 'btr':
-			if (this.frame.regs[a]) this.frame.pc = b;
+			if (this.frame.regs[a]) goto(sb);
 			else this.frame.pc++;
 			break;
 		case 'bfs':
-			if (!this.frame.regs[a]) this.frame.pc = b;
+			if (!this.frame.regs[a]) goto(sb);
 			else this.frame.pc++;
 			break;
 		case 'cas':
@@ -109,13 +117,15 @@ class Scheduler {
 			const running = Object.keys(this.ready);
 			if (!running.length) break;
 			for (const tid of running) {
-				// console.log(`\x1B[34mSlice=${SLICE} for thread ${tid}\x1B[0m`);
+				console.log(`\x1B[34mslice=${SLICE} for thread "${tid}"\x1B[0m`);
 				const thread = this.ready[tid];
 				this.frame = thread.frame;
-				for (let j = 0; j < SLICE; j++) {
+				let j = 0;
+				for (; j < SLICE; j++) {
 					// The thread is over:
 					if (this.frame.pc >= thread.cmds.length) {
 						delete this.ready[tid];
+						console.log(`\x1B[34mthread "${tid}" exits\x1B[0m`);
 						break;
 					}
 					try {
@@ -136,6 +146,7 @@ class Scheduler {
 						console.log(e.message);
 					}
 				}
+				console.log(`\x1B[34m${j} total slice run\x1B[0m\n`);
 			}
 		}
 	}
@@ -368,9 +379,9 @@ const mutex_lock = new Scheduler(
 			'pst  1',
 			'br   34',
 			
-			'imm  0, 0',  // release HELD
-			"sto  0, 0",
-			'sto  0, 1',  // release the mutex's LOCK
+			'imm  0, 0',
+			"sto  0, 0",  // release HELD
+			'sto  0, 1',  // release LOCK
 		]
 	},
 },
@@ -379,6 +390,219 @@ const mutex_lock = new Scheduler(
 	o.memory[3] = 4;
 });
 
+/* 3. Condition variable (pthread style)
+
+def cond_wait(c: Cond, m: Mutex):
+	spin_lock(c.lock)
+	c.queue.add(self)
+	spin_unlock(c.lock)
+	mtx_unlock(m)
+	block()
+	mtx_lock(m)
+
+def cond_signal(c: Cond):
+	spin_lock(c.lock)
+	if len(c.lock) > 0:
+		t = c.lock.dequeue()
+		spin_unlock(c.lock)
+		post(t)
+	else:
+		spin_unlock(c.lock)
+
+*/
+const cond_var = new Scheduler({
+	'0': {  // waiter
+		frame: new Frame,
+		cmds: [
+			'cas  0, 1',  // mtx_lock, acquire LOCK
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'cas  0, 0',  // acquire HELD
+			'btr  0, :3',
+			'sto  0, 1',  // release LOCK
+			'br   :10',	  // END with fast route
+			'imm  0, 0',  // TID, slow route, add self to queue
+			'lod  1, 3',
+			'str  0, 1',
+			'imm  0, 1',
+			'add  0, 1',
+			'sto  0, 3',
+			'imm  0, 0',
+			'sto  0, 1',  // release LOCK
+			'blk',		   // END OF mtx_lock, block self
+			
+			'lod  0, 49',  // CRITICAL STARTS using mem[49] as required condition
+			'btr  0, :51',
+			
+			'cas  0, 4',   // cond_wait, spin_lock
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'lod  0, 6',   // queue.add(self)
+			'imm  1, 0',   // TID
+			'str  1, 0',
+			'imm  1, 1',
+			'add  0, 1',
+			'sto  0, 6',
+			'imm  0, 0',   // spin_unlock
+			'sto  0, 4',
+			'cas  0, 1',   // mtx_unlock, acquire LOCK
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'lod  0, 2',   // HEAD
+			'lod  1, 3',   // TAIL
+			'sub  1, 0',   // length of queue
+			'bfs  1, :9',
+			'ldr  1, 0',   // pop from queue
+			'imm  2, 1',
+			'add  0, 2',
+			'sto  0, 2',
+			'imm  0, 0',
+			'sto  0, 1',   // release LOCK
+			'pst  1',      // post waiter
+			'br   :4',     // END if waiters exist
+			'imm  0, 0',   // if no waiter:
+			'sto  0, 0',   // release HELD
+			'sto  0, 1',   // END OF mtx_unlock, release LOCK
+			
+			'blk',         // block self
+			
+			'cas  0, 1',   // mtx_lock, acquire LOCK
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'cas  0, 0',  // acquire HELD
+			'btr  0, :3',
+			'sto  0, 1',  // release LOCK
+			'br   :10',	  // END with fast route
+			'imm  0, 0',  // TID, slow route, add self to queue
+			'lod  1, 3',
+			'str  0, 1',
+			'imm  0, 1',
+			'add  0, 1',
+			'sto  0, 3',
+			'imm  0, 0',
+			'sto  0, 1',   // release LOCK
+			'blk',		   // END OF cond_wait, END OF mtx_lock, block self
+			
+			'br   :-51',  // CRITICAL ENDS
+			
+			'cas  0, 1',   // mtx_unlock, acquire LOCK
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'lod  0, 2',   // HEAD
+			'lod  1, 3',   // TAIL
+			'sub  1, 0',   // length of queue
+			'bfs  1, :9',
+			'ldr  1, 0',   // pop from queue
+			'imm  2, 1',
+			'add  0, 2',
+			'sto  0, 2',
+			'imm  0, 0',
+			'sto  0, 1',   // release LOCK
+			'pst  1',      // post waiter
+			'br   :4',     // END if waiters exist
+			'imm  0, 0',   // if no waiter:
+			'sto  0, 0',   // release HELD
+			'sto  0, 1',   // END OF mtx_unlock, release LOCK
+		],
+		
+	},
+	'1': {  // poster
+		frame: new Frame,
+		cmds: [
+			'cas  0, 1',   // mtx_lock, acquire LOCK
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'cas  0, 0',  // acquire HELD
+			'btr  0, :3',
+			'sto  0, 1',  // release LOCK
+			'br   :10',	  // END with fast route
+			'imm  0, 1',  // TID, slow route, add self to queue
+			'lod  1, 3',
+			'str  0, 1',
+			'imm  0, 1',
+			'add  0, 1',
+			'sto  0, 3',
+			'imm  0, 0',
+			'sto  0, 1',   // release LOCK
+			'blk',		   // END OF cond_wait, END OF mtx_lock, block self
+			
+			// Write mem[49] = 1, to satisfy the condition
+			'imm  0, 1',
+			'sto  0, 49',
+			
+			// Signal the waiter thread:
+			// def cond_signal(c: Cond):
+			// 	spin_lock(c.lock)
+			'cas  0, 4',
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			// 	if len(c.lock) > 0:
+			'lod  0, 5',
+			'lod  1, 6',
+			'sub  1, 0',
+			'bfs  1, :9',
+			// 		t = c.lock.dequeue()
+			'ldr  1, 0',
+			'imm  2, 1',
+			'add  0, 2',
+			'sto  0, 5',
+			// 		spin_unlock(c.lock)
+			'imm  0, 0',
+			'sto  0, 4',
+			// 		post(t)
+			'pst  1',
+			'br   :3',
+			// 	else:
+			// 		spin_unlock(c.lock)
+			'imm  0, 0',
+			'sto  0, 4',
+
+			'cas  0, 1',   // mtx_unlock, acquire LOCK
+			'bfs  0, :3',
+			'yld',
+			'br   :-3',
+			'lod  0, 2',   // HEAD
+			'lod  1, 3',   // TAIL
+			'sub  1, 0',   // length of queue
+			'bfs  1, :9',
+			'ldr  1, 0',   // pop from queue
+			'imm  2, 1',
+			'add  0, 2',
+			'sto  0, 2',
+			'imm  0, 0',
+			'sto  0, 1',   // release LOCK
+			'pst  1',      // post waiter
+			'br   :4',     // END if waiters exist
+			'imm  0, 0',   // if no waiter:
+			'sto  0, 0',   // release HELD
+			'sto  0, 1',   // END OF mtx_unlock, release LOCK
+		],
+	},
+}, (o) => {
+	// m.held: mem[0]
+	// m.lock: mem[1]
+	// m.queue_head: mem[2]
+	// m.queue_tail: mem[3]
+	// mutex queue starts from mem[10]
+	o.memory[2] = 10;
+	o.memory[3] = 10;
+	
+	// c.lock: mem[4]
+	// c.queue_head: mem[5]
+	// c.queue_tail: mem[6]
+	// condition variable queue starts from mem[20]
+	o.memory[5] = 20;
+	o.memory[6] = 20;
+});
+
 // spin_lock.loop();
 // spin_lock_with_yld.loop();
-mutex_lock.loop();
+// mutex_lock.loop();
+cond_var.loop();
