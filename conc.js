@@ -26,16 +26,7 @@ class Scheduler {
 				this.frame.pc = parseInt(addr);
 			}
 		}
-		/* Available instructions:
-		 * imm reg, imm
-		 * lod reg, mem
-		 * sto reg, mem
-		 * ldr reg, mem[reg]
-		 * str reg, mem[reg]
-		 * br pos
-		 * btr reg, pos
-		 * bfs reg, pos
-		 */
+
 		const [op, sa, sb] = cmd.split(/\s*,?\s+/, 3);
 		const [a, b] = [sa, sb].map(s => parseInt(s));
 		console.log(`${op}\t${sa}, ${sb}`);
