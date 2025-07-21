@@ -26,10 +26,20 @@ class Scheduler {
 				this.frame.pc = parseInt(addr);
 			}
 		}
+		
+		const print_cmd = ([op, sa, sb]) => {
+			if (!sa) {
+				console.log(`${op}`);
+			} else if (!sb) {
+				console.log(`${op}\t${sa}`);
+			} else {
+				console.log(`${op}\t${sa}, ${sb}`);
+			}
+		}
 
 		const [op, sa, sb] = cmd.split(/\s*,?\s+/, 3);
 		const [a, b] = [sa, sb].map(s => parseInt(s));
-		console.log(`${op}\t${sa}, ${sb}`);
+		print_cmd([op, sa, sb]);
 		switch (op) {
 		case 'prt':
 			console.log(this.frame.regs[a]);
@@ -108,7 +118,7 @@ class Scheduler {
 			const running = Object.keys(this.ready);
 			if (!running.length) break;
 			for (const tid of running) {
-				console.log(`\x1B[34mslice=${SLICE} for thread "${tid}"\x1B[0m`);
+				console.log(`\x1B[34m"${tid}"\x1B[0m`);
 				const thread = this.ready[tid];
 				this.frame = thread.frame;
 				let j = 0;
@@ -116,7 +126,7 @@ class Scheduler {
 					// The thread is over:
 					if (this.frame.pc >= thread.cmds.length) {
 						delete this.ready[tid];
-						console.log(`\x1B[34mthread "${tid}" exits\x1B[0m`);
+						console.log(`\x1B[31mthread "${tid}" exits\x1B[0m`);
 						break;
 					}
 					try {
