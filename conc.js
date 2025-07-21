@@ -14,7 +14,9 @@ class Scheduler {
 		this.ready = threads;
 		this.blocked = {};
 		this.pstmsg = {};
-		action(this);
+		if (action) {
+			action(this);
+		}
 	}
 	
 	#execute(cmd) {
@@ -147,90 +149,87 @@ class Scheduler {
 						console.log(e.message);
 					}
 				}
-				console.log(`\x1B[34m${j} total slice run\x1B[0m\n`);
+				console.log(`\x1B[34m${j} slices run\x1B[0m\n`);
 			}
 		}
 	}
 }
 
 
-/* 1. Spin-Lock
-spin_trylock(lock):
-	cas  t0, lock  # result in `t0`
+/* 1. Spin-Lock */
+const spin_lock = (lock, t) => [
+	`cas  ${t}, ${lock}`,
+	`btr  ${t}, :-1`, ];
+	
+const spin_trylock = (lock, t) => [
+	`cas  ${t}, ${lock}`, ];
+	
+const spin_unlock = (lock, t) => [
+	`imm  ${t}, 0`,
+	`sto  ${t}, ${lock}`, ];
 
-spin_lock(lock):
-	cas  t0, lock
-	btr  t0, :-1
-
-spin_unlock(lock)
-	imm  t0, 0
-	sto  t0, lock
-*/
-const spin_lock = new Scheduler({
+const run_spin_lock = new Scheduler({
 	'Thread-0': {
 		frame: new Frame,
 		cmds: [
-			'cas  4, 4',  // check the lock
-			'btr  4, 0',  // loop back if lock occupied
+			...spin_lock(1, 0),
 			
 			'imm  0, 123',
 			'sto  0, 0',
 			'lod  0, 0',
 			'prt  0',
 			
-			'sto  3, 4',  // release the lock
+			...spin_unlock(1, 0),
 		]
 	},
 	'Thread-1': {
 		frame: new Frame,
 		cmds: [
-			'cas  4, 4',
-			'btr  4, 0',
-	
+			...spin_lock(1, 0),
+			
 			'imm  0, 456',
 			'sto  0, 0',
-		
-			'sto  3, 4',
+			
+			...spin_unlock(1, 0),
 		]
 	},
-}, o=>{});
+});
 
-const spin_lock_with_yld = new Scheduler({
+const spin_lock_yld = (lock, t) => [
+	`cas  ${t}, ${lock}`,	// check the lock
+	`bfs  ${t}, :+3`,		// go in if lock acquired
+	`yld`,					// else yld, and try again next time
+	`br   :-3`,
+	/* We may also yield only after a few spins;
+	   Just spinning for ONE time here. */ ];
+
+const run_spin_lock_with_yld = new Scheduler({
 	'Thread-0': {
 		frame: new Frame,
 		cmds: [
-			'cas  4, 4',  // check the lock
-			'bfs  4, 4',  // go in if lock acquired
-			'yld',		// else yld, and try again next time
-			'br   0',
-			/* We may also yld only after a few spins; just spinning
-			   for ONE time here. */
+			...spin_lock_yld(0, 2),
 			
-			// occupy the lock:
 			'imm  0, -1',
 			'imm  1, 50',
 			'add  1, 0',
 			'prt  1',
-			'btr  1, 6',
+			'btr  1, :-2',
 			
-			'sto  3, 4',  // release the lock
+			...spin_unlock(0, 2),
 		]
 	},
 	'Thread-1': {
 		frame: new Frame,
 		cmds: [
-			'cas  4, 4',  // check the lock
-			'bfs  4, 4',  // go in if lock acquired
-			'yld',		// else yld, and try again next time
-			'br   0',
+			...spin_lock_yld(0, 2),
 			
 			'imm  0, 123', // prt '123'
 			'prt  0',
 			
-			'sto  3, 4',
+			...spin_unlock(0, 2),
 		]
 	},
-}, o=>{});
+});
 
 /* 2. Mutex (pthread style)
 mtx_trylock(m):
@@ -258,131 +257,91 @@ mtx_unlock(m):
 	}
 
  */
-const mutex_lock = new Scheduler(
+const mutex_lock = (m, tid, t0, t1) => [
+	...spin_lock_yld(m.lock, t0),
+	
+	...spin_trylock(m.held, t0),
+	`btr  ${t0}, :+4`,  	// enter the slow route if HELD occupied
+	
+	/* The fast */
+	...spin_unlock(m.lock, t0),
+	`br   :+10`,			// return, HELD acquired
+	
+	/* The slow */
+	`lod  ${t0}, ${m.queue_tail}`,
+	`imm  ${t1}, ${tid}`,
+	`str  ${t1}, ${t0}`,	// add TID to queue
+	`imm  ${t1}, 1`,
+	`add  ${t0}, ${t1}`,	// tail + 1
+	`sto  ${t0}, ${m.queue_tail}`,
+	...spin_unlock(m.lock, t0),
+	`blk`,	
+	
+	/* Awaken, the HELD is ours now. No need to set HELD, because the
+	thread who awoke us didn't unset it. Just continue running. */ ];
+	
+const mutex_unlock = (m, t0, t1) => [
+	...spin_lock_yld(m.lock, t0),
+	
+	`lod  ${t0}, ${m.queue_head}`,
+	`lod  ${t1}, ${m.queue_tail}`,
+	`sub  ${t1}, ${t0}`,
+	`bfs  ${t1}, :+10`,
+	
+	/* queue non-empty */
+	`imm  ${t1}, 1`, // increment head
+	`add  ${t0}, ${t1}`,
+	`sto  ${t0}, ${m.queue_head}`,
+	`sub  ${t0}, ${t1}`,
+	`ldr  ${t1}, ${t0}`, // first TID in queue
+	...spin_unlock(m.lock, t0),
+	`pst  ${t1}`,
+	`br   :+5`,
+	
+	/* queue empty */
+	`imm  ${t0}, 0`,
+	`sto  ${t0}, ${m.held}`, // release HELD
+	...spin_unlock(m.lock, t0),
+]
+
+const mtx = {
+	lock: 0,
+	held: 1,
+	queue_head: 2,
+	queue_tail: 3,
+};
+
+const run_mutex_lock = new Scheduler(
 	{
 	'0': {
 		frame: new Frame,
 		cmds: [
-			// mtx_lock
-			// We use mem[0], mem[1] as held & lock
-			'cas  0, 1',  // acquire the mutex's LOCK
-			'btr  0, 0',
+			...mutex_lock(mtx, 0, 2, 3),
 			
-			'cas  0, 0',  // check the HELD
-			'btr  0, 6',  // enter the slow route on HELD occupied
-			
-			'sto  0, 1',  // release the LOCK
-			'br   15',    // return, HELD acquired
-			
-			// Assume that the queue data structure:
-			// - mem[2]: head of queue
-			// - mem[3]: tail of queue
-			// locked up by LOCK.
-			'imm  0, 0', // TID
-			'lod  1, 3', // tail
-			'str  0, 1', // add TID to queue
-			'imm  0, 1',
-			'add  0, 1', // tail + 1
-			'sto  0, 3', // update mem[3]
-			
-			'imm  0, 0',
-			'sto  0, 1',  // release the mutex's LOCK
-			
-			'blk',	
-			/* Awaken, the HELD is ours now. No need to set HELD, because the
-			awoker didn't unset it. Just continue running. */
-			
-			// occupy the lock:
 			'imm  0, -1',
 			'imm  1, 15',
 			'add  1, 0',
 			'prt  1',
-			'btr  1, 17',
+			'btr  1, :-2',
 			
-			// mtx_unlock
-			'cas  0, 1',  // acquire the mutex's LOCK
-			'btr  0, 20',
+			...mutex_unlock(mtx, 2, 3),
 			
-			'lod  0, 2',  // queue head
-			'lod  1, 3',  // queue tail
-			'sub  1, 0',
-			'bfs  1, 34',
-			
-			'ldr  1, 0',  // first TID in queue
-			'imm  2, 1',  // increment head
-			'add  0, 2',
-			'sto  0, 2',
-			'imm  0, 0',
-			'sto  0, 1',  // release the mutex's LOCK
-			'pst  1',
-			'br   37',
-			
-			'imm  0, 0',  // release HELD
-			"sto  0, 0",
-			'sto  0, 1',  // release the mutex's LOCK
-			
-			'imm  0, -1',
-			'imm  1, 30',
-			'add  1, 0',
-			'prt  1',
-			'btr  1, 39',
+			`imm  0, -1`,
+			`imm  1, 15`,
+			`add  1, 0`,
+			`prt  1`,
+			`btr  1, :-2`,
 		]
 	},
 	'1': {
 		frame: new Frame,
 		cmds: [
-			// mtx_lock
-			// We use mem[0], mem[1] as held & lock
-			'cas  0, 1',  // acquire the mutex's LOCK
-			'btr  0, 0',
+			...mutex_lock(mtx, 1, 0, 1),
 			
-			'cas  0, 0',  // check the HELD
-			'btr  0, 6',  // enter the slow route on HELD occupied
-			
-			'sto  0, 1',  // release the LOCK
-			'br   15',    // return, HELD acquired
-			
-			// Assume that the queue data structure:
-			// - mem[2]: head of queue
-			// - mem[3]: tail of queue
-			// locked up by LOCK.
-			'imm  0, 1', // TID
-			'lod  1, 3', // tail
-			'str  0, 1', // add TID to queue
-			'imm  0, 1',
-			'add  0, 1', // tail + 1
-			'sto  0, 3', // update mem[3]
-			
-			'imm  0, 0',
-			'sto  0, 1',  // release the mutex's LOCK
-			
-			'blk',	
-			
-			// Print a flag
 			'imm  0, 123', // prt '123'
 			'prt  0',
 			
-			// mtx_unlock
-			'cas  0, 1',  // acquire the mutex's LOCK
-			'btr  0, 17',
-			
-			'lod  0, 2',  // queue head
-			'lod  1, 3',  // queue tail
-			'sub  1, 0',
-			'bfs  1, 31',
-			
-			'ldr  1, 0',  // first TID in queue
-			'imm  2, 1',  // increment head
-			'add  0, 2',
-			'sto  0, 2',
-			'imm  0, 0',
-			'sto  0, 1',  // release the mutex's LOCK
-			'pst  1',
-			'br   34',
-			
-			'imm  0, 0',
-			"sto  0, 0",  // release HELD
-			'sto  0, 1',  // release LOCK
+			...mutex_unlock(mtx, 0, 1),
 		]
 	},
 },
@@ -603,7 +562,7 @@ const cond_var = new Scheduler({
 	o.memory[6] = 20;
 });
 
-// spin_lock.loop();
-// spin_lock_with_yld.loop();
-// mutex_lock.loop();
-cond_var.loop();
+// run_spin_lock.loop();
+// run_spin_lock_with_yld.loop();
+run_mutex_lock.loop();
+// cond_var.loop();
