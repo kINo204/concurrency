@@ -6,6 +6,7 @@ class Frame {
 }
 	
 class Scheduler {
+	running = null;
 	memory = new Array(MEM_SIZE).fill(0);  // shared user-space memory
 	frame = new Frame;  // the frame currently in use
 	ready; blocked; pstmsg;
@@ -17,6 +18,20 @@ class Scheduler {
 		if (action) {
 			action(this);
 		}
+		this.#parse_labels(threads);
+	}
+	
+	#parse_labels(threads) {
+		for (let tid in threads) {
+			let t = threads[tid];
+			t.labels = {};
+			for (let c of t.cmds) {
+				const [op, sa, sb] = c.split(/\s*,?\s+/, 3);
+				if (op === 'lab') {
+					t.labels[sa] = t.cmds.indexOf(c);
+				}
+			}
+		}
 	}
 	
 	#execute(cmd) {
@@ -25,7 +40,11 @@ class Scheduler {
 				const target = parseInt(addr.slice(1));
 				this.frame.pc += target;
 			} else {
-				this.frame.pc = parseInt(addr);
+				if (parseInt(addr)) {
+					this.frame.pc = parseInt(addr);
+				} else {
+					this.frame.pc = this.running.labels[addr];
+				}
 			}
 		}
 		
@@ -42,7 +61,11 @@ class Scheduler {
 		const [op, sa, sb] = cmd.split(/\s*,?\s+/, 3);
 		const [a, b] = [sa, sb].map(s => parseInt(s));
 		print_cmd([op, sa, sb]);
+		
 		switch (op) {
+		case 'lab':
+			this.frame.pc++;
+			break;
 		case 'prt':
 			console.log(this.frame.regs[a]);
 			this.frame.pc++;
@@ -122,6 +145,7 @@ class Scheduler {
 			for (const tid of running) {
 				console.log(`\x1B[34m"${tid}"\x1B[0m`);
 				const thread = this.ready[tid];
+				this.running = thread;
 				this.frame = thread.frame;
 				let j = 0;
 				for (; j < SLICE; j++) {
@@ -257,17 +281,20 @@ mtx_unlock(m):
 	}
 
  */
-const mutex_lock = (m, tid, t0, t1) => [
+const mutex_lock = (m, tid, t0, t1) => {
+	const id = Math.round(Math.random() * 1000000);
+	return [
 	...spin_lock_yld(m.lock, t0),
 	
 	...spin_trylock(m.held, t0),
-	`btr  ${t0}, :+4`,  	// enter the slow route if HELD occupied
+	`btr  ${t0}, slow_${id}`,  	// enter the slow route if HELD occupied
 	
 	/* The fast */
 	...spin_unlock(m.lock, t0),
-	`br   :+10`,			// return, HELD acquired
+	`br   end_${id}`,			// return, HELD acquired
 	
 	/* The slow */
+	`lab  slow_${id}`,
 	`lod  ${t0}, ${m.queue_tail}`,
 	`imm  ${t1}, ${tid}`,
 	`str  ${t1}, ${t0}`,	// add TID to queue
@@ -277,16 +304,20 @@ const mutex_lock = (m, tid, t0, t1) => [
 	...spin_unlock(m.lock, t0),
 	`blk`,	
 	
+	`lab  end_${id}`,
 	/* Awaken, the HELD is ours now. No need to set HELD, because the
-	thread who awoke us didn't unset it. Just continue running. */ ];
+	thread who awoke us didn't unset it. Just continue running. */ ]
+};
 	
-const mutex_unlock = (m, t0, t1) => [
+const mutex_unlock = (m, t0, t1) => {
+	const id = Math.round(Math.random() * 1000000);
+	return [
 	...spin_lock_yld(m.lock, t0),
 	
 	`lod  ${t0}, ${m.queue_head}`,
 	`lod  ${t1}, ${m.queue_tail}`,
 	`sub  ${t1}, ${t0}`,
-	`bfs  ${t1}, :+10`,
+	`bfs  ${t1}, empty_${id}`,
 	
 	/* queue non-empty */
 	`imm  ${t1}, 1`, // increment head
@@ -296,13 +327,15 @@ const mutex_unlock = (m, t0, t1) => [
 	`ldr  ${t1}, ${t0}`, // first TID in queue
 	...spin_unlock(m.lock, t0),
 	`pst  ${t1}`,
-	`br   :+5`,
+	`br   end_${id}`,
 	
 	/* queue empty */
+	`lab  empty_${id}`,
 	`imm  ${t0}, 0`,
 	`sto  ${t0}, ${m.held}`, // release HELD
 	...spin_unlock(m.lock, t0),
-]
+	`lab  end_${id}`, ];
+};
 
 const mtx = {
 	lock: 0,
