@@ -107,4 +107,4 @@ new Scheduler({
 	o.memory[5] = 20;
 	o.memory[6] = 20;
 })
-.loop();
+// .loop();
