@@ -1,7 +1,15 @@
+export {
+	Semaphore,
+	sem_wait,
+	sem_post,
+	sem_show,
+}
+
 import {
 	spin_lock_yld,
     spin_unlock,
 } from './spinlock.js'
+
 
 function Semaphore(lock, val, queue_head, queue_tail) {
 	this.lock = lock;
