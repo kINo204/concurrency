@@ -255,32 +255,7 @@ const run_spin_lock_with_yld = new Scheduler({
 	},
 });
 
-/* 2. Mutex (pthread style)
-mtx_trylock(m):
-	return spin_trylock(m.held);
-	
-mtx_lock(m):
-	spin_lock(m.lock);
-	if (spin_trylock(m.held) == 0) {
-		spin_unlock(m.lock);
-	} else {
-		m.queue.add(self)
-		spin_unlock(m.lock);
-		block(self);
-	}
-	
-mtx_unlock(m):
-	spin_lock(m.lock);
-	if (m.queue.length > 0) {
-		t = m.queue.remove(0);
-		spin_unlock(m.lock);
-		post(t);
-	} else {
-		m.held = 0;
-		spin_unlock(m.lock);
-	}
-
- */
+/* 2. Mutex (pthread style) */
 const mutex_lock = (m, tid, t0, t1) => {
 	const id = Math.round(Math.random() * 1000000);
 	return [
@@ -383,27 +358,7 @@ const run_mutex_lock = new Scheduler(
 	o.memory[3] = 4;
 });
 
-/* 3. Condition variable (pthread style)
-
-def cond_wait(c: Cond, m: Mutex):
-	spin_lock(c.lock)
-	c.queue.add(self)
-	spin_unlock(c.lock)
-	mtx_unlock(m)
-	block()
-	mtx_lock(m)
-
-def cond_signal(c: Cond):
-	spin_lock(c.lock)
-	if len(c.lock) > 0:
-		t = c.lock.dequeue()
-		spin_unlock(c.lock)
-		post(t)
-	else:
-		spin_unlock(c.lock)
-
-*/
-
+/* 3. Condition variable (pthread style) */
 const cond_wait = (c, m, tid, t0, t1) => [
 	...spin_lock_yld(c.lock, t0),
 	
@@ -488,18 +443,11 @@ const run_cond_var = new Scheduler({
 		],
 	},
 }, (o) => {
-	// m.held: mem[0]
-	// m.lock: mem[1]
-	// m.queue_head: mem[2]
-	// m.queue_tail: mem[3]
-	// mutex queue starts from mem[10]
+	// mutex's queue starts from mem[10]
 	o.memory[2] = 10;
 	o.memory[3] = 10;
 	
-	// c.lock: mem[4]
-	// c.queue_head: mem[5]
-	// c.queue_tail: mem[6]
-	// condition variable queue starts from mem[20]
+	// cond's queue starts from mem[20]
 	o.memory[5] = 20;
 	o.memory[6] = 20;
 });
