@@ -403,179 +403,88 @@ def cond_signal(c: Cond):
 		spin_unlock(c.lock)
 
 */
-const cond_var = new Scheduler({
+
+const cond_wait = (c, m, tid, t0, t1) => [
+	...spin_lock_yld(c.lock, t0),
+	
+	`lod  ${t0}, ${c.queue_tail}`,   // queue.add(self)
+	`imm  ${t1}, ${tid}`,
+	`str  ${t1}, ${t0}`,
+	`imm  ${t1}, 1`,
+	`add  ${t0}, ${t1}`,
+	`sto  ${t0}, ${c.queue_tail}`,
+	
+	...spin_unlock(c.lock, t0),
+	...mutex_unlock(m, t0, t1),
+	
+	`blk`,         // block self
+	
+	...mutex_lock(m, 0, 0, 1),
+];
+
+const cond_signal = (c, t0, t1) => {
+	const id = Math.round(Math.random() * 1000000);
+	return [
+	...spin_lock_yld(c.lock, t0),
+	
+	`lod  ${t0}, ${c.queue_head}`,
+	`lod  ${t1}, ${c.queue_tail}`,
+	`sub  ${t1}, ${t0}`,
+	`bfs  ${t1}, empty_${id}`,
+	
+	`imm  ${t1}, 1`, // increment head
+	`add  ${t0}, ${t1}`,
+	`sto  ${t0}, ${c.queue_head}`,
+	`sub  ${t0}, ${t1}`,
+	`ldr  ${t1}, ${t0}`, // first TID in queue
+	...spin_unlock(c.lock, t0),
+	`pst  ${t1}`,
+	`br   end_${id}`,
+	
+	`lab  empty_${id}`,
+	...spin_unlock(c.lock, t0),
+	
+	`lab  end_${id}`,
+	];
+};
+
+const cond = {
+	lock: 4,
+	queue_head: 5,
+	queue_tail: 6,
+};
+
+const run_cond_var = new Scheduler({
 	'0': {  // waiter
 		frame: new Frame,
 		cmds: [
-			'cas  0, 1',  // mtx_lock, acquire LOCK
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'cas  0, 0',  // acquire HELD
-			'btr  0, :3',
-			'sto  0, 1',  // release LOCK
-			'br   :10',	  // END with fast route
-			'imm  0, 0',  // TID, slow route, add self to queue
-			'lod  1, 3',
-			'str  0, 1',
-			'imm  0, 1',
-			'add  0, 1',
-			'sto  0, 3',
-			'imm  0, 0',
-			'sto  0, 1',  // release LOCK
-			'blk',		   // END OF mtx_lock, block self
+			...mutex_lock(mtx, 0, 0, 1),
 			
+			'lab  check',
 			'lod  0, 49',  // CRITICAL STARTS using mem[49] as required condition
-			'btr  0, :51',
+			'btr  0, success',
 			
-			'cas  0, 4',   // cond_wait, spin_lock
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'lod  0, 6',   // queue.add(self)
-			'imm  1, 0',   // TID
-			'str  1, 0',
-			'imm  1, 1',
-			'add  0, 1',
-			'sto  0, 6',
-			'imm  0, 0',   // spin_unlock
-			'sto  0, 4',
-			'cas  0, 1',   // mtx_unlock, acquire LOCK
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'lod  0, 2',   // HEAD
-			'lod  1, 3',   // TAIL
-			'sub  1, 0',   // length of queue
-			'bfs  1, :9',
-			'ldr  1, 0',   // pop from queue
-			'imm  2, 1',
-			'add  0, 2',
-			'sto  0, 2',
-			'imm  0, 0',
-			'sto  0, 1',   // release LOCK
-			'pst  1',      // post waiter
-			'br   :4',     // END if waiters exist
-			'imm  0, 0',   // if no waiter:
-			'sto  0, 0',   // release HELD
-			'sto  0, 1',   // END OF mtx_unlock, release LOCK
+			...cond_wait(cond, mtx, 0, 0, 1),
 			
-			'blk',         // block self
+			'br   check',  // CRITICAL ENDS
+			'lab  success',
 			
-			'cas  0, 1',   // mtx_lock, acquire LOCK
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'cas  0, 0',  // acquire HELD
-			'btr  0, :3',
-			'sto  0, 1',  // release LOCK
-			'br   :10',	  // END with fast route
-			'imm  0, 0',  // TID, slow route, add self to queue
-			'lod  1, 3',
-			'str  0, 1',
-			'imm  0, 1',
-			'add  0, 1',
-			'sto  0, 3',
-			'imm  0, 0',
-			'sto  0, 1',   // release LOCK
-			'blk',		   // END OF cond_wait, END OF mtx_lock, block self
-			
-			'br   :-51',  // CRITICAL ENDS
-			
-			'cas  0, 1',   // mtx_unlock, acquire LOCK
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'lod  0, 2',   // HEAD
-			'lod  1, 3',   // TAIL
-			'sub  1, 0',   // length of queue
-			'bfs  1, :9',
-			'ldr  1, 0',   // pop from queue
-			'imm  2, 1',
-			'add  0, 2',
-			'sto  0, 2',
-			'imm  0, 0',
-			'sto  0, 1',   // release LOCK
-			'pst  1',      // post waiter
-			'br   :4',     // END if waiters exist
-			'imm  0, 0',   // if no waiter:
-			'sto  0, 0',   // release HELD
-			'sto  0, 1',   // END OF mtx_unlock, release LOCK
+			...mutex_unlock(mtx, 0, 1),
 		],
 		
 	},
 	'1': {  // poster
 		frame: new Frame,
 		cmds: [
-			'cas  0, 1',   // mtx_lock, acquire LOCK
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'cas  0, 0',  // acquire HELD
-			'btr  0, :3',
-			'sto  0, 1',  // release LOCK
-			'br   :10',	  // END with fast route
-			'imm  0, 1',  // TID, slow route, add self to queue
-			'lod  1, 3',
-			'str  0, 1',
-			'imm  0, 1',
-			'add  0, 1',
-			'sto  0, 3',
-			'imm  0, 0',
-			'sto  0, 1',   // release LOCK
-			'blk',		   // END OF cond_wait, END OF mtx_lock, block self
+			...mutex_lock(mtx, 1, 0, 1),
 			
 			// Write mem[49] = 1, to satisfy the condition
 			'imm  0, 1',
 			'sto  0, 49',
 			
-			// Signal the waiter thread:
-			// def cond_signal(c: Cond):
-			// 	spin_lock(c.lock)
-			'cas  0, 4',
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			// 	if len(c.lock) > 0:
-			'lod  0, 5',
-			'lod  1, 6',
-			'sub  1, 0',
-			'bfs  1, :9',
-			// 		t = c.lock.dequeue()
-			'ldr  1, 0',
-			'imm  2, 1',
-			'add  0, 2',
-			'sto  0, 5',
-			// 		spin_unlock(c.lock)
-			'imm  0, 0',
-			'sto  0, 4',
-			// 		post(t)
-			'pst  1',
-			'br   :3',
-			// 	else:
-			// 		spin_unlock(c.lock)
-			'imm  0, 0',
-			'sto  0, 4',
+			...cond_signal(cond, 0, 1),
 
-			'cas  0, 1',   // mtx_unlock, acquire LOCK
-			'bfs  0, :3',
-			'yld',
-			'br   :-3',
-			'lod  0, 2',   // HEAD
-			'lod  1, 3',   // TAIL
-			'sub  1, 0',   // length of queue
-			'bfs  1, :9',
-			'ldr  1, 0',   // pop from queue
-			'imm  2, 1',
-			'add  0, 2',
-			'sto  0, 2',
-			'imm  0, 0',
-			'sto  0, 1',   // release LOCK
-			'pst  1',      // post waiter
-			'br   :4',     // END if waiters exist
-			'imm  0, 0',   // if no waiter:
-			'sto  0, 0',   // release HELD
-			'sto  0, 1',   // END OF mtx_unlock, release LOCK
+			...mutex_unlock(mtx, 0, 1),
 		],
 	},
 }, (o) => {
@@ -597,5 +506,5 @@ const cond_var = new Scheduler({
 
 // run_spin_lock.loop();
 // run_spin_lock_with_yld.loop();
-run_mutex_lock.loop();
-// cond_var.loop();
+// run_mutex_lock.loop();
+run_cond_var.loop();
