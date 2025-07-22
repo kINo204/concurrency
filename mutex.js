@@ -53,11 +53,10 @@ const mutex_unlock = (m, t0, t1) => {
 	`bfs  ${t1}, empty_${id}`,
 	
 	/* queue non-empty */
-	`imm  ${t1}, 1`, // increment head
-	`add  ${t0}, ${t1}`,
-	`sto  ${t0}, ${m.queue_head}`,
-	`sub  ${t0}, ${t1}`,
+	`lod  ${t0}, ${s.queue_head}`,
 	`ldr  ${t1}, ${t0}`, // first TID in queue
+	`adi  ${t0}, +1`,
+	`sto  ${t0}, ${s.queue_head}`,
 	...spin_unlock(m.lock, t0),
 	`pst  ${t1}`,
 	`br   end_${id}`,

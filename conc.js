@@ -94,6 +94,14 @@ class Scheduler {
 			this.frame.regs[a] -= this.frame.regs[b];
 			this.frame.pc++;
 			break;
+		case 'adi':
+			this.frame.regs[a] += b;
+			this.frame.pc++;
+			break;
+		case 'sbi':
+			this.frame.regs[a] -= b;
+			this.frame.pc++;
+			break;
 		case 'lod':
 			this.frame.regs[a] = this.memory[b];
 			this.frame.pc++;
