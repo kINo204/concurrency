@@ -1,4 +1,5 @@
 export {
+	Mutex,
 	mutex_lock,
 	mutex_unlock,
 }
@@ -20,14 +21,14 @@ const mutex_lock = (m, tid, t0, t1) => {
 	...spin_lock_yld(m.lock, t0),
 	
 	...spin_trylock(m.held, t0),
-	`btr  ${t0}, slow_${id}`,  	// enter the slow route if HELD occupied
+	`btr  ${t0}, mtx_lock_slow_${id}`,  	// enter the slow route if HELD occupied
 	
 	/* The fast */
 	...spin_unlock(m.lock, t0),
-	`br   end_${id}`,			// return, HELD acquired
+	`br   mtx_lock_end_${id}`,			// return, HELD acquired
 	
 	/* The slow */
-	`lab  slow_${id}`,
+	`lab  mtx_lock_slow_${id}`,
 	`lod  ${t0}, ${m.queue_tail}`,
 	`imm  ${t1}, ${tid}`,
 	`str  ${t1}, ${t0}`,	// add TID to queue
@@ -37,7 +38,7 @@ const mutex_lock = (m, tid, t0, t1) => {
 	...spin_unlock(m.lock, t0),
 	`blk`,	
 	
-	`lab  end_${id}`,
+	`lab  mtx_lock_end_${id}`,
 	/* Awaken, the HELD is ours now. No need to set HELD, because the
 	thread who awoke us didn't unset it. Just continue running. */ ]
 };
@@ -50,7 +51,7 @@ const mutex_unlock = (m, t0, t1) => {
 	`lod  ${t0}, ${m.queue_head}`,
 	`lod  ${t1}, ${m.queue_tail}`,
 	`sub  ${t1}, ${t0}`,
-	`bfs  ${t1}, empty_${id}`,
+	`bfs  ${t1}, mtx_unlock_empty_${id}`,
 	
 	/* queue non-empty */
 	`lod  ${t0}, ${m.queue_head}`,
@@ -59,25 +60,28 @@ const mutex_unlock = (m, t0, t1) => {
 	`sto  ${t0}, ${m.queue_head}`,
 	...spin_unlock(m.lock, t0),
 	`pst  ${t1}`,
-	`br   end_${id}`,
+	`br   mtx_unlock_end_${id}`,
 	
 	/* queue empty */
-	`lab  empty_${id}`,
+	`lab  mtx_unlock_empty_${id}`,
 	`imm  ${t0}, 0`,
 	`sto  ${t0}, ${m.held}`, // release HELD
 	...spin_unlock(m.lock, t0),
-	`lab  end_${id}`, ];
+	`lab  mtx_unlock_end_${id}`, ];
 };
 
-const mtx = {
-	lock: 0,
-	held: 1,
-	queue_head: 2,
-	queue_tail: 3,
-};
-
+class Mutex {
+	constructor(lock, held, queue_head, queue_tail) {
+		this.lock = lock;
+		this.held = held;
+		this.queue_head = queue_head;
+		this.queue_head = queue_tail;
+	}
+}
 
 /* An example */
+const mtx = new Mutex(0, 1, 2, 3);
+
 new Scheduler(
 	{
 	'0': {
