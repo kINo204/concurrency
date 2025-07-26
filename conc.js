@@ -82,6 +82,10 @@ class Scheduler {
 			console.log(this.frame.regs[a]);
 			this.frame.pc++;
 			break;
+		case 'prs':
+			console.log('\x1B[32m' + sa + '\x1B[0m');
+			this.frame.pc++;
+			break;
 		case 'imm':
 			this.frame.regs[a] = b;
 			this.frame.pc++;
