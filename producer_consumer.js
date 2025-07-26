@@ -67,7 +67,7 @@ new Scheduler(
 },
 
 o=>{
-	o.memory[11] = 5; // buffer length
+	o.memory[11] = 1; // buffer length
 	o.memory[2]  = o.memory[3]  = 4;
 	o.memory[12] = o.memory[13] = 14;
 	o.memory[22] = o.memory[23] = 24;
