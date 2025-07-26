@@ -16,11 +16,13 @@ import {
 } from './spinlock.js'
 
 
-function Semaphore(lock, val, queue_head, queue_tail) {
-	this.lock = lock;
-	this.val = val;
-	this.queue_head = queue_head;
-	this.queue_tail = queue_tail;
+class Semaphore {
+    constructor(lock, val, queue_head, queue_tail) {
+        this.lock = lock;
+        this.val = val;
+        this.queue_head = queue_head;
+        this.queue_tail = queue_tail;
+    }
 }
 
 const sem_wait = (s, tid, t0, t1) => {
