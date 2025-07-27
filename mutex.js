@@ -15,6 +15,15 @@ import {
 } from './spinlock.js'
 
 
+class Mutex {
+	constructor(lock, held, queue_head, queue_tail) {
+		this.lock = lock;
+		this.held = held;
+		this.queue_head = queue_head;
+		this.queue_tail = queue_tail;
+	}
+}
+
 const mutex_lock = (m, tid, t0, t1) => {
 	const id = Math.round(Math.random() * 1000000);
 	return [
@@ -70,14 +79,6 @@ const mutex_unlock = (m, t0, t1) => {
 	`lab  mtx_unlock_end_${id}`, ];
 };
 
-class Mutex {
-	constructor(lock, held, queue_head, queue_tail) {
-		this.lock = lock;
-		this.held = held;
-		this.queue_head = queue_head;
-		this.queue_head = queue_tail;
-	}
-}
 
 /* An example */
 const mtx = new Mutex(0, 1, 2, 3);
