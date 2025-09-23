@@ -17,10 +17,11 @@ class Scheduler {
 	frame;  // current frame
 	ready; blocked; pstmsg;
 	
-	constructor(threads, action, SLICE=20, MEM_SIZE=50, REG_SIZE=5) {
+	constructor(threads, action, DBG=true, SLICE=20, MEM_SIZE=50, REG_SIZE=5) {
 		this.MEM_SIZE = MEM_SIZE;
 		this.REG_SIZE = REG_SIZE;
 		this.SLICE = SLICE;
+		this.DBG = DBG;
 		
 		this.memory = new Array(this.MEM_SIZE).fill(0);  // shared user-space memory
 		this.frame = new Frame(this.REG_SIZE);  // the frame currently in use
@@ -72,7 +73,8 @@ class Scheduler {
 
 		const [op, sa, sb] = cmd.split(/\s*,?\s+/, 3);
 		const [a, b] = [sa, sb].map(s => parseInt(s));
-		print_cmd([op, sa, sb]);
+		if (this.DBG)
+			print_cmd([op, sa, sb]);
 		
 		switch (op) {
 		case 'lab':
@@ -167,7 +169,8 @@ class Scheduler {
 			const running = Object.keys(this.ready);
 			if (!running.length) break;
 			for (const tid of running) {
-				console.log(`\x1B[34m"${tid}"\x1B[0m`);
+				if (this.DBG)
+					console.log(`\x1B[34m"${tid}"\x1B[0m`);
 				const thread = this.ready[tid];
 				this.running = thread;
 				this.frame = thread.frame;
@@ -176,7 +179,8 @@ class Scheduler {
 					// The thread is over:
 					if (this.frame.pc >= thread.cmds.length) {
 						delete this.ready[tid];
-						console.log(`\x1B[31mthread "${tid}" exits\x1B[0m`);
+						if (this.DBG)
+							console.log(`\x1B[31mthread "${tid}" exits\x1B[0m`);
 						break;
 					}
 					try {
@@ -197,7 +201,8 @@ class Scheduler {
 						console.log(e.message);
 					}
 				}
-				console.log(`\x1B[34m${j} slices run\x1B[0m\n`);
+				if (this.DBG)
+					console.log(`\x1B[34m${j} slices run\x1B[0m\n`);
 			}
 		}
 	}
