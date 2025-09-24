@@ -17,7 +17,7 @@ class Scheduler {
 	frame;  // current frame
 	ready; blocked; pstmsg;
 	
-	constructor(threads, action, DBG=true, SLICE=20, MEM_SIZE=50, REG_SIZE=5) {
+	constructor(threads, action, DBG=false, SLICE=20, MEM_SIZE=50, REG_SIZE=5) {
 		this.MEM_SIZE = MEM_SIZE;
 		this.REG_SIZE = REG_SIZE;
 		this.SLICE = SLICE;
