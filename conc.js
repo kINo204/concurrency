@@ -159,9 +159,11 @@ class Scheduler {
 			}
 			this.frame.pc++;
 			break;
+		case 'err':
+			throw new Error(sa);
 		default:
 			this.frame.pc++;
-			throw new SyntaxError('Undefined instruction');
+			throw new Error('undefined instruction');
 		}
 	}
 	
@@ -199,7 +201,8 @@ class Scheduler {
 							}
 						}
 					} catch (e) {
-						console.log(e.message);
+						console.log(`\x1B[31mhalt by exception: ${e.message}.\x1B[0m\n`);
+						return;
 					}
 				}
 				if (this.DBG)
