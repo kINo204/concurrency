@@ -39,7 +39,7 @@ const enqueue = (q, reg, t0) => [
     `lod  ${reg}, ${q.head}`,
     `sub  ${t0}, ${reg}`,
     `btr  ${t0}, :+2`,
-    `err  inqueue-on-full`,
+    `err  enqueue-on-full`,
 ]
 
 const dequeue = (q, reg, t0) => [
