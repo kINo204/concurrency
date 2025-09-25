@@ -14,13 +14,23 @@ import {
 	spin_unlock,
 } from './spinlock.js'
 
+import {
+	Queue,
+	enqueue,
+	dequeue,
+	qlength,
+} from './queue.js';
+
 
 class Mutex {
-	constructor(lock, held, queue_head, queue_tail) {
-		this.lock = lock;
-		this.held = held;
-		this.queue_head = queue_head;
-		this.queue_tail = queue_tail;
+	constructor(addr, queue_beg=addr+4, queue_len=6) {
+		[
+			this.lock,
+			this.held,
+		]
+		= Array.from({length: 2}, (_, i) => addr + i);
+
+		this.queue = new Queue(addr + 2, queue_beg, queue_len);
 	}
 }
 
@@ -38,12 +48,8 @@ const mutex_lock = (m, tid, t0, t1) => {
 	
 	/* The slow */
 	`lab  mtx_lock_slow_${id}`,
-	`lod  ${t0}, ${m.queue_tail}`,
-	`imm  ${t1}, ${tid}`,
-	`str  ${t1}, ${t0}`,	// add TID to queue
-	`imm  ${t1}, 1`,
-	`add  ${t0}, ${t1}`,	// tail + 1
-	`sto  ${t0}, ${m.queue_tail}`,
+	`imm  ${t0}, ${tid}`,
+	...enqueue(m.queue, t0, t1),
 	...spin_unlock(m.lock, t0),
 	`blk`,	
 	
@@ -56,19 +62,14 @@ const mutex_unlock = (m, t0, t1) => {
 	const id = Math.round(Math.random() * 1000000);
 	return [
 	...spin_lock_yld(m.lock, t0),
-	
-	`lod  ${t0}, ${m.queue_head}`,
-	`lod  ${t1}, ${m.queue_tail}`,
-	`sub  ${t1}, ${t0}`,
-	`bfs  ${t1}, mtx_unlock_empty_${id}`,
+
+	...qlength(m.queue, t0, t1),
+	`bfs  ${t0}, mtx_unlock_empty_${id}`,
 	
 	/* queue non-empty */
-	`lod  ${t0}, ${m.queue_head}`,
-	`ldr  ${t1}, ${t0}`, // first TID in queue
-	`adi  ${t0}, +1`,
-	`sto  ${t0}, ${m.queue_head}`,
-	...spin_unlock(m.lock, t0),
-	`pst  ${t1}`,
+	...dequeue(m.queue, t0, t1),
+	...spin_unlock(m.lock, t1),
+	`pst  ${t0}`,
 	`br   mtx_unlock_end_${id}`,
 	
 	/* queue empty */
@@ -81,7 +82,7 @@ const mutex_unlock = (m, t0, t1) => {
 
 
 /* An example */
-const mtx = new Mutex(0, 1, 2, 3);
+const mtx = new Mutex(0);
 
 new Scheduler(
 	{

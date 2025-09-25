@@ -10,9 +10,9 @@ import {
 	Semaphore, sem_post, sem_wait,
 } from './semaphore.js';
 
-const mtx = new Mutex(20, 21, 22, 23);
-const nobjects = new Semaphore(0, 1, 2, 3);
-const nblanks  = new Semaphore(10, 11, 12, 13);
+const mtx = new Mutex(20);
+const nobjects = new Semaphore(0);
+const nblanks  = new Semaphore(10);
 
 new Scheduler(
 {

@@ -13,8 +13,8 @@ import {
 
 const count = 20;
 const s_count = 21;
-const m_rw = new Mutex(0, 1, 2, 3);
-const m_wr = new Mutex(10, 11, 12, 13);
+const m_rw = new Mutex(0);
+const m_wr = new Mutex(10);
 
 const reader = tid => [
 	...mutex_lock(m_wr, tid, 0, 1),

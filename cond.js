@@ -8,20 +8,31 @@ import {
 } from './spinlock.js'
 
 import {
+	Mutex,
 	mutex_lock,
 	mutex_unlock,
 } from './mutex.js'
 
+import {
+	Queue,
+	qlength,
+    enqueue,
+    dequeue,
+} from './queue.js';
+
+
+class Cond {
+	constructor(addr, queue_beg=addr+3, queue_len=7) {
+		this.lock = addr;
+		this.queue = new Queue(addr + 1, queue_beg, queue_len);
+	}
+}
 
 const cond_wait = (c, m, tid, t0, t1) => [
 	...spin_lock_yld(c.lock, t0),
-	
-	`lod  ${t0}, ${c.queue_tail}`,   // queue.add(self)
-	`imm  ${t1}, ${tid}`,
-	`str  ${t1}, ${t0}`,
-	`imm  ${t1}, 1`,
-	`add  ${t0}, ${t1}`,
-	`sto  ${t0}, ${c.queue_tail}`,
+
+	`imm  ${t0}, ${tid}`,
+	...enqueue(c.queue, t0, t1),
 	
 	...spin_unlock(c.lock, t0),
 	...mutex_unlock(m, t0, t1),
@@ -36,16 +47,10 @@ const cond_signal = (c, t0, t1) => {
 	return [
 	...spin_lock_yld(c.lock, t0),
 	
-	`lod  ${t0}, ${c.queue_head}`,
-	`lod  ${t1}, ${c.queue_tail}`,
-	`sub  ${t1}, ${t0}`,
-	`bfs  ${t1}, empty_${id}`,
+	...qlength(c.queue, t0, t1),
+	`bfs  ${t0}, empty_${id}`,
 	
-	`imm  ${t1}, 1`, // increment head
-	`add  ${t0}, ${t1}`,
-	`sto  ${t0}, ${c.queue_head}`,
-	`sub  ${t0}, ${t1}`,
-	`ldr  ${t1}, ${t0}`, // first TID in queue
+	...dequeue(c.queue, t1, t0),
 	...spin_unlock(c.lock, t0),
 	`pst  ${t1}`,
 	`br   end_${id}`,
@@ -59,11 +64,8 @@ const cond_signal = (c, t0, t1) => {
 
 
 /* An example */
-const cond = {
-	lock: 4,
-	queue_head: 5,
-	queue_tail: 6,
-};
+const cond = new Cond(0);
+const mtx = new Mutex(10);
 
 new Scheduler({
 	'0': {  // waiter
@@ -72,6 +74,7 @@ new Scheduler({
 			...mutex_lock(mtx, 0, 0, 1),
 			
 			'lab  check',
+			`prs  checking...`,
 			'lod  0, 49',  // CRITICAL STARTS using mem[49] as required condition
 			'btr  0, success',
 			
@@ -79,6 +82,7 @@ new Scheduler({
 			
 			'br   check',  // CRITICAL ENDS
 			'lab  success',
+			`prs  success`,
 			
 			...mutex_unlock(mtx, 0, 1),
 		],
@@ -92,6 +96,7 @@ new Scheduler({
 			// Write mem[49] = 1, to satisfy the condition
 			'imm  0, 1',
 			'sto  0, 49',
+			`prs  posted`,
 			
 			...cond_signal(cond, 0, 1),
 
@@ -99,12 +104,7 @@ new Scheduler({
 		],
 	},
 }, (o) => {
-	// mutex's queue starts from mem[10]
-	o.memory[2] = 10;
-	o.memory[3] = 10;
-	
-	// cond's queue starts from mem[20]
-	o.memory[5] = 20;
-	o.memory[6] = 20;
-})
+	o.memory[1] = o.memory[2] = 3;
+	o.memory[12] = o.memory[13] = 14;
+}, false)
 // .loop();

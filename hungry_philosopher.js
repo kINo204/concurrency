@@ -8,7 +8,7 @@ import {
 
 const chopsticks = new Array(5);
 for (let i = 0; i < 5; i++)
-    chopsticks[i] = new Semaphore(...([1,0,2,3].map(x=>x+i*10)));
+    chopsticks[i] = new Semaphore(10 * i);
 
 const left  = i => i;
 const right = i => (i + 1) % 5;
@@ -30,7 +30,7 @@ for (let i = 0; i < 5; i++)
 new Scheduler(threads,
               o => {
                 for (let i = 0; i < 5; i++) {
-                    o.memory[10 * i] = 1;
+                    o.memory[10 * i + 1] = 1;
                     o.memory[10 * i + 2] = 10 * i + 4;
                     o.memory[10 * i + 3] = 10 * i + 4;
                 }

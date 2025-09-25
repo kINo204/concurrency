@@ -13,7 +13,7 @@ import {
 
 const count = 10;
 const s_count = 11;
-const m_rw = new Mutex(0, 1, 2, 3);
+const m_rw = new Mutex(0);
 
 const reader = tid => [
 	...spin_lock_yld(s_count, 0),

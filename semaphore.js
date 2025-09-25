@@ -15,14 +15,23 @@ import {
     spin_unlock,
 } from './spinlock.js'
 
+import {
+	Queue,
+	enqueue,
+	dequeue,
+	qlength,
+} from './queue.js'
+
 
 class Semaphore {
-    constructor(lock, val, queue_head, queue_tail) {
-        this.lock = lock;
-        this.val = val;
-        this.queue_head = queue_head;
-        this.queue_tail = queue_tail;
-    }
+	constructor(addr, queue_beg=addr+4, queue_len=6) {
+		[
+			this.lock,
+			this.val,
+		] = Array.from({length: 2}, (_, i) => addr + i);
+
+		this.queue = new Queue(addr + 2, queue_beg, queue_len);
+	}
 }
 
 const sem_wait = (s, tid, t0, t1) => {
@@ -41,11 +50,8 @@ const sem_wait = (s, tid, t0, t1) => {
 	
 	/* The slow */
 	`lab  sem_wait_slow_${id}`,
-	`lod  ${t0}, ${s.queue_tail}`,
-	`imm  ${t1}, ${tid}`,
-	`str  ${t1}, ${t0}`,
-	`adi  ${t0}, 1`,
-	`sto  ${t0}, ${s.queue_tail}`,
+	`imm  ${t0}, ${tid}`,
+	...enqueue(s.queue, t0, t1),
 	...spin_unlock(s.lock, t0),
 	// out of critical area, to avoid deadlock
 	`blk`,
@@ -58,19 +64,14 @@ const sem_post = (s, t0, t1) => {
 	return [
 	...spin_lock_yld(s.lock, t0),
 	
-	`lod  ${t0}, ${s.queue_head}`,
-	`lod  ${t1}, ${s.queue_tail}`,
-	`sub  ${t1}, ${t0}`,
-	`bfs  ${t1}, sem_post_empty_${id}`,
+	...qlength(s.queue, t0, t1),
+	`bfs  ${t0}, sem_post_empty_${id}`,
 	
 	/* queue non-empty */
-	`lod  ${t0}, ${s.queue_head}`,
-	`ldr  ${t1}, ${t0}`, // first TID in queue
-	`adi  ${t0}, +1`,
-	`sto  ${t0}, ${s.queue_head}`,
-	...spin_unlock(s.lock, t0),
+	...dequeue(s.queue, t0, t1),
+	...spin_unlock(s.lock, t1),
 	// out of critical area, to avoid competetion for lock
-	`pst  ${t1}`,
+	`pst  ${t0}`,
 	`br   sem_post_end_${id}`,
 	
 	/* queue empty */
@@ -90,7 +91,7 @@ const sem_show = (s, t0) => [
 
 
 /* An example */
-const sem = new Semaphore(0, 1, 2, 3);
+const sem = new Semaphore(0);
 new Scheduler({
 	'0': {
 		frame: new Frame,
