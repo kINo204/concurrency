@@ -53,7 +53,8 @@ class Scheduler {
 				const target = parseInt(addr.slice(1));
 				this.frame.pc += target;
 			} else {
-				if (parseInt(addr)) {
+				const naddr = parseInt(addr);
+				if (Number.isInteger(naddr)) {
 					this.frame.pc = parseInt(addr);
 				} else {
 					this.frame.pc = this.running.labels[addr];
