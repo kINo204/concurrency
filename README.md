@@ -10,10 +10,10 @@ and build other software utilities based on it.
 
 Currently, there are three types of files:
 
-- Runtime environment: `conc.js`
-- Libraries: `queue.js`
-- Concurrent utilities
-- Examples
+- runtime environment: `conc.js`
+- libraries: `queue.js`
+- concurrent utilities
+- examples
 
 ## Concurrent Utilities
 
