@@ -29,6 +29,19 @@ new Scheduler({
 }).loop();
 ```
 
+Set options when creating a `Scheduler`. e.g., enable `DBG` to turn on instruction output:
+
+```
+"4" <- Thread ID
+imm     1, 0 <- Instructions
+sto     1, 10
+pst     0
+br      sem_post_end_894678
+lab     sem_post_end_894678
+thread "4" exits <- Logs
+5 slices run <- Statistics
+```
+
 ### Function & Calls
 
 "Functions" (macros, instead) are implemented as lambdas returning *an array
